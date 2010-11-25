@@ -1,0 +1,15 @@
+
+
+Version History
+
+v0.3
+
+- Renaming encoding to charset
+
+v0.2 
+
+- Adding ability to read custom objects
+
+v0.1
+
+- Initial Release
