@@ -175,7 +175,7 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
     /**
      * 
      */
-    public InputStream readContent() throws IOException {
+    public ContentInputStream readContent() throws IOException {
         int token = read();
         if (token == -1) {
             throw new EOFException();
@@ -184,7 +184,7 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
         return readContent(readContentLength(token));
     }
     
-    private InputStream readContent(long contentLength) throws IOException {
+    private ContentInputStream readContent(long contentLength) throws IOException {
         return new ContentInputStream(contentLength);
     }
     
@@ -491,7 +491,7 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
         return '0' <= token && token <= '9';
     }
     
-    private class ContentInputStream extends InputStream {
+    public class ContentInputStream extends InputStream {
         
         private final long contentLength;
         
@@ -499,8 +499,14 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
         
         private boolean open = true;
         
-        public ContentInputStream(long contentLength) {
+        private boolean eof = false;
+        
+        private ContentInputStream(long contentLength) {
             this.contentLength = contentLength;
+        }
+        
+        public long getContentLength() {
+            return contentLength;
         }
         
         @Override
@@ -509,14 +515,18 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
                 throw new IOException();
             }
             
-            if (pos >= contentLength) {
+            if (eof) {
                 throw new EOFException();
             }
             
-            int value = BencodingInputStream.this.read();
+            int value = -1;
+            if (0L < remaining()) {
+                value = BencodingInputStream.this.read();
+            }
             
             if (value == -1) {
                 pos = contentLength;
+                eof = true;
             } else {
                 ++pos;
             }
@@ -530,14 +540,20 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
                 throw new IOException();
             }
             
-            if (pos >= contentLength) {
+            if (eof) {
                 throw new EOFException();
             }
             
-            int r = BencodingInputStream.this.read(b, off, len);
+            int r = -1;
+            long remaining = remaining();
+            if (0L < remaining) {
+                r = BencodingInputStream.this.read(
+                        b, off, (int)Math.min(len, remaining));
+            }
             
             if (r == -1) {
                 pos = contentLength;
+                eof = true;
             } else {
                 pos += r;
             }
@@ -545,15 +561,24 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
             return r;
         }
 
+        public long remaining() {
+            return (open && !eof) ? contentLength-pos : 0L;
+        }
+        
         @Override
         public int available() throws IOException {
-            return (int)Math.min(contentLength - pos, Integer.MAX_VALUE);
+            if (!open || eof) {
+                throw new IOException();
+            }
+            
+            long remaining = remaining();
+            return (int)Math.min(remaining, Integer.MAX_VALUE);
         }
         
         @Override
         public void close() throws IOException {
             if (open) {
-                long remaining = contentLength-pos;
+                long remaining = remaining();
                 if (0L < remaining) {
                     skip(remaining);
                 }
