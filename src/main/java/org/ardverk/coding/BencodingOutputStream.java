@@ -17,8 +17,10 @@
 package org.ardverk.coding;
 
 import java.io.DataOutput;
+import java.io.EOFException;
 import java.io.FilterOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Array;
 import java.util.Collection;
@@ -135,9 +137,37 @@ public class BencodingOutputStream extends FilterOutputStream
      * Writes the given byte-Array 
      */
     public void writeBytes(byte[] value, int offset, int length) throws IOException {
-        write(Integer.toString(length).getBytes(charset));
-        write(BencodingUtils.LENGTH_DELIMITER);
+        writeContentLength(length);
         write(value, offset, length);
+    }
+    
+    /**
+     * Writes the content of the given {@link InputStream}.
+     */
+    public void writeContent(long contentLength, InputStream in) throws IOException {
+        writeContentLength(contentLength);
+        
+        byte[] buffer = new byte[4 * 1024];
+        long total = 0L;
+        
+        while (total < contentLength) {
+            int len = in.read(buffer);
+            if (len == -1) {
+                throw new EOFException();
+            }
+            
+            write(buffer, 0, len);
+            total += len;
+        }
+    }
+    
+    private void writeContentLength(long contentLength) throws IOException {
+        if (contentLength < 0L || Integer.MAX_VALUE < contentLength) {
+            throw new IOException("contentLength=" + contentLength);
+        }
+        
+        write(Long.toString(contentLength).getBytes(charset));
+        write(BencodingUtils.LENGTH_DELIMITER);
     }
     
     /**

@@ -137,7 +137,7 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
     }
     
     /**
-     * Reads and returns a byte-Array.
+     * Reads and returns a {@code byte[]}.
      */
     public byte[] readBytes() throws IOException {
         int token = read();
@@ -145,28 +145,47 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
             throw new EOFException();
         }
         
-        return readBytes(token);
+        return readBytes(readContentLength(token));
     }
     
-    /**
-     * 
-     */
-    private byte[] readBytes(int token) throws IOException {
-        StringBuilder buffer = new StringBuilder();
-        buffer.append((char)token);
+    private long readContentLength(int token) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append((char)token);
         
         while ((token = read()) != BencodingUtils.LENGTH_DELIMITER) {
             if (token == -1) {
                 throw new EOFException();
             }
             
-            buffer.append((char)token);
+            sb.append((char)token);
+        }
+        return Long.parseLong(sb.toString());
+    }
+    
+    private byte[] readBytes(long contentLength) throws IOException {
+        if (Integer.MAX_VALUE < contentLength) {
+            throw new IOException("contentLength=" + contentLength);
         }
         
-        int length = Integer.parseInt(buffer.toString());
-        byte[] data = new byte[length];
+        byte[] data = new byte[(int)contentLength];
         readFully(data);
         return data;
+    }
+    
+    /**
+     * 
+     */
+    public InputStream readContent() throws IOException {
+        int token = read();
+        if (token == -1) {
+            throw new EOFException();
+        }
+        
+        return readContent(readContentLength(token));
+    }
+    
+    private InputStream readContent(long contentLength) throws IOException {
+        return new ContentInputStream(contentLength);
     }
     
     /**
@@ -399,7 +418,7 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
     }
 
     /**
-     * 
+     * @see DataInput#readFully(byte[])
      */
     @Override
     public void readFully(byte[] dst) throws IOException {
@@ -407,7 +426,7 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
     }
     
     /**
-     * 
+     * @see DataInput#readFully(byte[], int, int)
      */
     @Override
     public void readFully(byte[] dst, int off, int len) throws IOException {
@@ -470,5 +489,76 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
      */
     private static boolean isDigit(int token) {
         return '0' <= token && token <= '9';
+    }
+    
+    private class ContentInputStream extends InputStream {
+        
+        private final long contentLength;
+        
+        private long pos = 0L;
+        
+        private boolean open = true;
+        
+        public ContentInputStream(long contentLength) {
+            this.contentLength = contentLength;
+        }
+        
+        @Override
+        public int read() throws IOException {
+            if (!open) {
+                throw new IOException();
+            }
+            
+            if (pos >= contentLength) {
+                throw new EOFException();
+            }
+            
+            int value = BencodingInputStream.this.read();
+            
+            if (value == -1) {
+                pos = contentLength;
+            } else {
+                ++pos;
+            }
+            
+            return value;
+        }
+        
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (!open) {
+                throw new IOException();
+            }
+            
+            if (pos >= contentLength) {
+                throw new EOFException();
+            }
+            
+            int r = BencodingInputStream.this.read(b, off, len);
+            
+            if (r == -1) {
+                pos = contentLength;
+            } else {
+                pos += r;
+            }
+            
+            return r;
+        }
+
+        @Override
+        public int available() throws IOException {
+            return (int)Math.min(contentLength - pos, Integer.MAX_VALUE);
+        }
+        
+        @Override
+        public void close() throws IOException {
+            if (open) {
+                long remaining = contentLength-pos;
+                if (0L < remaining) {
+                    skip(remaining);
+                }
+                open = false;
+            }
+        }
     }
 }
