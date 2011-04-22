@@ -1,6 +1,6 @@
 <project name="Bee-Encode" default="dist" basedir=".">
 	
-	<property name="bee-encode" value="bee-encode-0.2"/>
+	<property name="bee-encode" value="bee-encode-0.3"/>
 	
 	<property name="build" location="build"/>
 	<property name="dist" location="dist/${bee-encode}"/>
