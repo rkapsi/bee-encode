@@ -577,9 +577,13 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
         
         @Override
         public void close() throws IOException {
+            close(false);
+        }
+        
+        public void close(boolean skipRemaining) throws IOException {
             if (open) {
                 long remaining = remaining();
-                if (0L < remaining) {
+                if (skipRemaining && 0L < remaining) {
                     skip(remaining);
                 }
                 open = false;
