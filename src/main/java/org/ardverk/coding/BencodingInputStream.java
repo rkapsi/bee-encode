@@ -173,22 +173,6 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
     }
     
     /**
-     * 
-     */
-    public ContentInputStream readContent() throws IOException {
-        int token = read();
-        if (token == -1) {
-            throw new EOFException();
-        }
-        
-        return readContent(readContentLength(token));
-    }
-    
-    private ContentInputStream readContent(long contentLength) throws IOException {
-        return new ContentInputStream(contentLength);
-    }
-    
-    /**
      * Reads and returns a {@link String}.
      */
     public String readString() throws IOException {
@@ -489,105 +473,5 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
      */
     private static boolean isDigit(int token) {
         return '0' <= token && token <= '9';
-    }
-    
-    public class ContentInputStream extends InputStream {
-        
-        private final long contentLength;
-        
-        private long pos = 0L;
-        
-        private boolean open = true;
-        
-        private boolean eof = false;
-        
-        private ContentInputStream(long contentLength) {
-            this.contentLength = contentLength;
-        }
-        
-        public long getContentLength() {
-            return contentLength;
-        }
-        
-        @Override
-        public int read() throws IOException {
-            if (!open) {
-                throw new IOException();
-            }
-            
-            if (eof) {
-                throw new EOFException();
-            }
-            
-            int value = -1;
-            if (0L < remaining()) {
-                value = BencodingInputStream.this.read();
-            }
-            
-            if (value == -1) {
-                pos = contentLength;
-                eof = true;
-            } else {
-                ++pos;
-            }
-            
-            return value;
-        }
-        
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            if (!open) {
-                throw new IOException();
-            }
-            
-            if (eof) {
-                throw new EOFException();
-            }
-            
-            int r = -1;
-            long remaining = remaining();
-            if (0L < remaining) {
-                r = BencodingInputStream.this.read(
-                        b, off, (int)Math.min(len, remaining));
-            }
-            
-            if (r == -1) {
-                pos = contentLength;
-                eof = true;
-            } else {
-                pos += r;
-            }
-            
-            return r;
-        }
-
-        public long remaining() {
-            return (open && !eof) ? contentLength-pos : 0L;
-        }
-        
-        @Override
-        public int available() throws IOException {
-            if (!open || eof) {
-                throw new IOException();
-            }
-            
-            long remaining = remaining();
-            return (int)Math.min(remaining, Integer.MAX_VALUE);
-        }
-        
-        @Override
-        public void close() throws IOException {
-            close(false);
-        }
-        
-        public void close(boolean skipRemaining) throws IOException {
-            if (open) {
-                long remaining = remaining();
-                if (skipRemaining && 0L < remaining) {
-                    skip(remaining);
-                }
-                open = false;
-            }
-        }
     }
 }
