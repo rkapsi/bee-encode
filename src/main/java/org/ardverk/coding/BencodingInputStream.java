@@ -35,6 +35,26 @@ import java.util.TreeMap;
  */
 public class BencodingInputStream extends PushbackInputStream implements DataInput {
 
+    private static final ObjectFactory<Object> DEFAULT = new ObjectFactory<Object>() {
+        @Override
+        public Object read(BencodingInputStream in) throws IOException {
+            int token = in.peek();
+            
+            if (token == BencodingUtils.DICTIONARY) {
+                return in.readMap();            
+            } else if (token == BencodingUtils.LIST) {
+                return in.readList();
+            } else if (token == BencodingUtils.NUMBER) {
+                return in.readNumber();
+            } else if (isDigit(token)) {
+                byte[] data = in.raw();
+                return in.decodeAsString ? new String(data, in.charset) : data;
+            } else {
+                return in.readCustom();
+            }
+        }
+    };
+    
     /**
      * The charset that is being used for {@link String}s.
      */
@@ -120,6 +140,13 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
         return data;
     }
     
+    private void check(int expected) throws IOException {
+        int actual = -1;
+        if ((actual = pop()) != expected) {
+            throw new IOException("expected=" + expected + ", actual=" + actual);
+        }
+    }
+    
     public byte[] readBytes() throws IOException {
         StringBuilder sb = new StringBuilder();
         
@@ -135,20 +162,11 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
      * Reads and returns an {@link Object}.
      */
     public Object readObject() throws IOException {
-        int token = peek();
-        
-        if (token == BencodingUtils.DICTIONARY) {
-            return readMap();            
-        } else if (token == BencodingUtils.LIST) {
-            return readList();
-        } else if (token == BencodingUtils.NUMBER) {
-            return readNumber();
-        } else if (isDigit(token)) {
-            byte[] data = raw();
-            return decodeAsString ? new String(data, charset) : data;
-        } else {
-            return readCustom();
-        }
+        return readObject(DEFAULT);
+    }
+    
+    public <T> T readObject(ObjectFactory<? extends T> factory) throws IOException {
+        return factory.read(this);
     }
     
     protected Object readCustom() throws IOException {
@@ -180,9 +198,7 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
      * Reads and returns a {@link Number}.
      */
     public Number readNumber() throws IOException {
-        if (pop() != BencodingUtils.NUMBER) {
-            throw new IOException();
-        }
+        check(BencodingUtils.NUMBER);
         
         StringBuilder sb = new StringBuilder();
         
@@ -226,33 +242,31 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
      * Reads and returns a {@link List}.
      */
     public List<Object> readList() throws IOException {
-        return readList(Object.class);
+        return readList(DEFAULT);
     }
     
     /**
      * Reads and returns a {@link List}.
      */
-    public <T> List<T> readList(Class<T> clazz) throws IOException {
-        return readCollection(new ArrayList<T>(), clazz);
+    public <T> List<T> readList(ObjectFactory<? extends T> factory) throws IOException {
+        return readCollection(new ArrayList<T>(), factory);
     }
     
     /**
      * Reads and returns a {@link Collection}.
      */
     public <T extends Collection<Object>> T readCollection(T dst) throws IOException {
-        return readCollection(dst, Object.class);
+        return readCollection(dst, DEFAULT);
     }
     
     /**
      * Reads and returns a {@link Collection}.
      */
-    public <E, T extends Collection<E>> T readCollection(T dst, Class<E> clazz) throws IOException {
-        if (pop() != BencodingUtils.LIST) {
-            throw new IOException();
-        }
+    public <E, T extends Collection<E>> T readCollection(T dst, ObjectFactory<? extends E> factory) throws IOException {
+        check(BencodingUtils.LIST);
         
         while (peek() != BencodingUtils.EOF) {
-            dst.add(clazz.cast(readObject()));
+            dst.add(readObject(factory));
         }
         
         return dst;
@@ -262,34 +276,34 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
      * Reads and returns a {@link Map}.
      */
     public Map<String, Object> readMap() throws IOException {
-        return readMap(Object.class);
+        return readMap(DEFAULT);
     }
     
     /**
      * Reads and returns a {@link Map}.
      */
     public Map<String, Object> readMap(Map<String, Object> dst) throws IOException {
-        return readMap(dst, Object.class);
+        return readMap(dst, DEFAULT);
     }
     
     /**
      * Reads and returns a {@link Map}.
      */
-    public <T> Map<String, T> readMap(Class<T> clazz) throws IOException {
-        return readMap(new TreeMap<String, T>(), clazz);
+    public <T> Map<String, T> readMap(ObjectFactory<? extends T> factory) throws IOException {
+        return readMap(new TreeMap<String, T>(), factory);
     }
     
     /**
      * Reads and returns a {@link Map}.
      */
-    public <T> Map<String, T> readMap(Map<String, T> dst, Class<T> clazz) throws IOException {
-        if (pop() != BencodingUtils.DICTIONARY) {
-            throw new IOException();
-        }
+    public <T> Map<String, T> readMap(Map<String, T> dst, 
+            ObjectFactory<? extends T> factory) throws IOException {
+        
+        check(BencodingUtils.DICTIONARY);
         
         while (peek() != BencodingUtils.EOF) {
             String key = new String(raw(), charset);
-            T value = clazz.cast(readObject());
+            T value = readObject(factory);
             dst.put(key, value);
         }
         
@@ -432,5 +446,9 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
      */
     private static boolean isDigit(int token) {
         return '0' <= token && token <= '9';
+    }
+    
+    public static interface ObjectFactory<T> {
+        public T read(BencodingInputStream in) throws IOException;
     }
 }
