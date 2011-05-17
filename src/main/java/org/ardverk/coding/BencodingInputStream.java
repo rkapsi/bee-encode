@@ -1,5 +1,5 @@
 /*
- * Copyright 2009 Roger Kapsi
+ * Copyright 2009-2011 Roger Kapsi
  *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
@@ -18,12 +18,13 @@ package org.ardverk.coding;
 
 import java.io.DataInput;
 import java.io.EOFException;
-import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PushbackInputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -32,8 +33,8 @@ import java.util.TreeMap;
  * An implementation of {@link InputStream} that can decode 
  * Bencoded (Bee-Encoded) data.
  */
-public class BencodingInputStream extends FilterInputStream implements DataInput {
-    
+public class BencodingInputStream extends PushbackInputStream implements DataInput {
+
     /**
      * The charset that is being used for {@link String}s.
      */
@@ -95,81 +96,63 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
         return decodeAsString;
     }
     
+    protected int pop() throws IOException {
+        int value = read();
+        if (value == -1) {
+            throw new EOFException();
+        }
+        return value;
+    }
+    
+    protected int peek() throws IOException {
+        int value = pop();
+        unread(value);
+        return value;
+    }
+    
+    private byte[] raw() throws IOException {
+        return raw(pop());
+    }
+    
+    private byte[] raw(int length) throws IOException {
+        byte[] data = new byte[length];
+        readFully(data);
+        return data;
+    }
+    
+    public byte[] readBytes() throws IOException {
+        StringBuilder sb = new StringBuilder();
+        
+        int value = -1;
+        while ((value = pop()) != BencodingUtils.LENGTH_DELIMITER) {
+            sb.append((char)value);
+        }
+        
+        return raw(Integer.parseInt(sb.toString()));
+    }
+    
     /**
      * Reads and returns an {@link Object}.
      */
     public Object readObject() throws IOException {
-        int token = read();
-        if (token == -1) {
-            throw new EOFException();
-        }
+        int token = peek();
         
-        return readObject(token);
-    }
-    
-    /**
-     * Reads and returns an Object of the given type
-     */
-    protected Object readObject(int token) throws IOException {
         if (token == BencodingUtils.DICTIONARY) {
-            return readMap0(Object.class);
-            
+            return readMap();            
         } else if (token == BencodingUtils.LIST) {
-            return readList0(Object.class);
-            
+            return readList();
         } else if (token == BencodingUtils.NUMBER) {
-            return readNumber0();
-            
+            return readNumber();
         } else if (isDigit(token)) {
-            byte[] data = readBytes(token);
+            byte[] data = raw();
             return decodeAsString ? new String(data, charset) : data;
-            
         } else {
-            return readCustom(token);
+            return readCustom();
         }
     }
     
-    /**
-     * Override this method to read custom objects of the given type
-     */
-    protected Object readCustom(int token) throws IOException {
-        throw new IOException("Not implemented: " + token);
-    }
-    
-    /**
-     * Reads and returns a {@code byte[]}.
-     */
-    public byte[] readBytes() throws IOException {
-        int token = read();
-        if (token == -1) {
-            throw new EOFException();
-        }
-        
-        return readBytes(readContentLength(token));
-    }
-    
-    private long readContentLength(int token) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        sb.append((char)token);
-        
-        while ((token = read()) != BencodingUtils.LENGTH_DELIMITER) {
-            if (token == -1) {
-                throw new EOFException();
-            }
-            
-            sb.append((char)token);
-        }
-        return Long.parseLong(sb.toString());
-    }
-    
-    private byte[] readBytes(long contentLength) throws IOException {
-        if (Integer.MAX_VALUE < contentLength) {
-            throw new IOException("contentLength=" + contentLength);
-        }
-        
-        byte[] data = new byte[(int)contentLength];
-        readFully(data);
-        return data;
+    protected Object readCustom() throws IOException {
+        throw new IOException();
     }
     
     /**
@@ -180,9 +163,9 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
     }
     
     /**
-     * 
+     * Reads and returns a {@link String}.
      */
-    private String readString(String encoding) throws IOException {
+    public String readString(String encoding) throws IOException {
         return new String(readBytes(), encoding);
     }
     
@@ -191,6 +174,126 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
      */
     public <T extends Enum<T>> T readEnum(Class<T> clazz) throws IOException {
         return Enum.valueOf(clazz, readString());
+    }
+    
+    /**
+     * Reads and returns a {@link Number}.
+     */
+    public Number readNumber() throws IOException {
+        if (pop() != BencodingUtils.NUMBER) {
+            throw new IOException();
+        }
+        
+        StringBuilder sb = new StringBuilder();
+        
+        boolean decimal = false;
+        int token = -1;
+        
+        while ((token = pop()) != BencodingUtils.EOF) {
+            if (token == '.') {
+                decimal = true;
+            }
+            
+            sb.append((char)token);
+        }
+        
+        try {
+            if (decimal) {
+                return new BigDecimal(sb.toString());
+            } else {
+                return new BigInteger(sb.toString());
+            }
+        } catch (NumberFormatException err) {
+            throw new IOException("NumberFormatException", err);
+        }
+    }
+    
+    /**
+     * Reads and returns an array of {@link Object}s
+     */
+    public Object[] readArray() throws IOException {
+        return readList().toArray();
+    }
+    
+    /**
+     * Reads and returns an array of {@link Object}s
+     */
+    public <T> T[] readArray(T[] a) throws IOException {
+        return readList().toArray(a);
+    }
+    
+    /**
+     * Reads and returns a {@link List}.
+     */
+    public List<Object> readList() throws IOException {
+        return readList(Object.class);
+    }
+    
+    /**
+     * Reads and returns a {@link List}.
+     */
+    public <T> List<T> readList(Class<T> clazz) throws IOException {
+        return readCollection(new ArrayList<T>(), clazz);
+    }
+    
+    /**
+     * Reads and returns a {@link Collection}.
+     */
+    public <T extends Collection<Object>> T readCollection(T dst) throws IOException {
+        return readCollection(dst, Object.class);
+    }
+    
+    /**
+     * Reads and returns a {@link Collection}.
+     */
+    public <E, T extends Collection<E>> T readCollection(T dst, Class<E> clazz) throws IOException {
+        if (pop() != BencodingUtils.LIST) {
+            throw new IOException();
+        }
+        
+        while (peek() != BencodingUtils.EOF) {
+            dst.add(clazz.cast(readObject()));
+        }
+        
+        return dst;
+    }
+
+    /**
+     * Reads and returns a {@link Map}.
+     */
+    public Map<String, Object> readMap() throws IOException {
+        return readMap(Object.class);
+    }
+    
+    /**
+     * Reads and returns a {@link Map}.
+     */
+    public Map<String, Object> readMap(Map<String, Object> dst) throws IOException {
+        return readMap(dst, Object.class);
+    }
+    
+    /**
+     * Reads and returns a {@link Map}.
+     */
+    public <T> Map<String, T> readMap(Class<T> clazz) throws IOException {
+        return readMap(new TreeMap<String, T>(), clazz);
+    }
+    
+    /**
+     * Reads and returns a {@link Map}.
+     */
+    public <T> Map<String, T> readMap(Map<String, T> dst, Class<T> clazz) throws IOException {
+        if (pop() != BencodingUtils.DICTIONARY) {
+            throw new IOException();
+        }
+        
+        while (peek() != BencodingUtils.EOF) {
+            String key = new String(raw(), charset);
+            T value = clazz.cast(readObject());
+            dst.put(key, value);
+        }
+        
+        return dst;
     }
     
     /**
@@ -257,150 +360,6 @@ public class BencodingInputStream extends FilterInputStream implements DataInput
         return readNumber().doubleValue();
     }
     
-    /**
-     * Reads and returns a {@link Number}.
-     */
-    public Number readNumber() throws IOException {
-        int token = read();
-        if (token == -1) {
-            throw new EOFException();
-        }
-        
-        if (token != BencodingUtils.NUMBER) {
-            throw new IOException();
-        }
-        
-        return readNumber0();
-    }
-    
-    /**
-     * 
-     */
-    private Number readNumber0() throws IOException {
-        StringBuilder buffer = new StringBuilder();
-        
-        boolean decimal = false;
-        int token = -1;
-        
-        while ((token = read()) != BencodingUtils.EOF) {
-            if (token == -1) {
-                throw new EOFException();
-            }
-            
-            if (token == '.') {
-                decimal = true;
-            }
-            
-            buffer.append((char)token);
-        }
-        
-        try {
-            if (decimal) {
-                return new BigDecimal(buffer.toString());
-            } else {
-                return new BigInteger(buffer.toString());
-            }
-        } catch (NumberFormatException err) {
-            throw new IOException("NumberFormatException", err);
-        }
-    }
-    
-    /**
-     * Reads and returns an array of {@link Object}s
-     */
-    public Object[] readArray() throws IOException {
-        return readList().toArray();
-    }
-    
-    /**
-     * Reads and returns an array of {@link Object}s
-     */
-    public <T> T[] readArray(T[] a) throws IOException {
-        return readList().toArray(a);
-    }
-    
-    /**
-     * Reads and returns a {@link List}.
-     */
-    public List<?> readList() throws IOException {
-        return readList(Object.class);
-    }
-    
-    /**
-     * Reads and returns a {@link List}.
-     */
-    public <T> List<T> readList(Class<T> clazz) throws IOException {
-        int token = read();
-        if (token == -1) {
-            throw new EOFException();
-        }
-        
-        if (token != BencodingUtils.LIST) {
-            throw new IOException();
-        }
-        
-        return readList0(clazz);
-    }
-    
-    /**
-     * 
-     */
-    private <T> List<T> readList0(Class<T> clazz) throws IOException {
-        List<T> list = new ArrayList<T>();
-        int token = -1;
-        while ((token = read()) != BencodingUtils.EOF) {
-            if (token == -1) {
-                throw new EOFException();
-            }
-            
-            list.add(clazz.cast(readObject(token)));
-        }
-        return list;
-    }
-    
-    /**
-     * Reads and returns a {@link Map}.
-     */
-    public Map<String, ?> readMap() throws IOException {
-        return readMap(Object.class);
-    }
-    
-    /**
-     * Reads and returns a {@link Map}.
-     */
-    public <T> Map<String, T> readMap(Class<T> clazz) throws IOException {
-        int token = read();
-        if (token == -1) {
-            throw new EOFException();
-        }
-        
-        if (token != BencodingUtils.DICTIONARY) {
-            throw new IOException();
-        }
-        
-        return readMap0(clazz);
-    }
-    
-    /**
-     * 
-     */
-    private <T> Map<String, T> readMap0(Class<T> clazz) throws IOException {
-        Map<String, T> map = new TreeMap<String, T>();
-        int token = -1;
-        while ((token = read()) != BencodingUtils.EOF) {
-            if (token == -1) {
-                throw new EOFException();
-            }
-            
-            String key = new String(readBytes(token), charset);
-            T value = clazz.cast(readObject());
-            
-            map.put(key, value);
-        }
-        
-        return map;
-    }
-
     /**
      * @see DataInput#readFully(byte[])
      */
