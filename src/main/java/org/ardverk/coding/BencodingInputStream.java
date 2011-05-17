@@ -269,6 +269,8 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
             dst.add(readObject(factory));
         }
         
+        pop(); // Consume the EOF
+        
         return dst;
     }
 
@@ -306,6 +308,8 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
             T value = readObject(factory);
             dst.put(key, value);
         }
+        
+        pop(); // consume the EOF
         
         return dst;
     }
