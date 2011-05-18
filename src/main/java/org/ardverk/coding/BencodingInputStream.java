@@ -239,6 +239,14 @@ public class BencodingInputStream extends PushbackInputStream implements DataInp
     }
     
     /**
+     * Reads and returns an array of {@link Object}s
+     */
+    public <T> T[] readArray(ObjectFactory<? extends T> factory, T[] a) 
+            throws IOException {
+        return readList(factory).toArray(a);
+    }
+    
+    /**
      * Reads and returns a {@link List}.
      */
     public List<Object> readList() throws IOException {
