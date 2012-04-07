@@ -8,3 +8,4 @@ dist
 target
 pom.xml.releaseBackup
 release.properties
+.gradle
